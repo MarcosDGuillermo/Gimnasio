@@ -93,7 +93,7 @@ function defaultEx(){return {
   'Trapecio':{tipo:'kg'},'Sentadillas':{tipo:'corporal'},'Abdominales':{tipo:'corporal'}}}
 function seed(){
   const f=(ex,kg,reps,n)=>({id:uid(),kind:'f',ex,sets:Array.from({length:n},()=>[kg,reps])});
-  return {ex:defaultEx(),w:{'2026-10-08':[f('Jalón',10,12,3),f('Remo',9,12,3),f('Press banco plano',12.5,12,3),f('Bíceps mancuernas',10,12,3),f('Tríceps',6,12,3),f('Vuelo lateral mancuernas',5,8,3),f('Vuelo frontal mancuernas',5,8,3),f('Trapecio',20,15,3)]}};
+  return {ex:defaultEx(),w:{}};
 }
 function fixEx(r){
   if(!r.ex)r.ex=defaultEx();
@@ -230,6 +230,7 @@ function vHist(){
     h+=`<div class="card" data-go="${d}" style="cursor:pointer"><b style="text-transform:capitalize">${fmtD(d)}</b><div class="mut" style="margin-top:4px">${a.map(e=>e.kind==='f'?esc(e.ex):esc(e.act)).join(' · ')}</div></div>`;
   });
   h+=syncCard();
+  h+=`<div class="card"><b>Limpieza</b><div class="mut" style="margin:6px 0 10px">Si ves entrenamientos repetidos, esto deja uno solo de cada uno y los borra también del Sheet.</div><button class="wide" id="dedup">Quitar duplicados</button></div>`;
   h+=`<div class="card"><b>Respaldo</b><div class="mut" style="margin:6px 0 10px">Tus datos se guardan en este celular. Descargá una copia de vez en cuando.</div>
   <div class="g2"><button id="expC">Exportar CSV</button><button id="expJ">Exportar JSON</button></div>
   <button class="wide" id="impJ" style="margin-top:8px">Importar JSON</button><input type="file" id="fl" accept=".json" hidden></div>`;
@@ -422,6 +423,19 @@ function csv(){
   return rows.map(r=>r.map(q).join(',')).join('\n');
 }
 
+function dedupe(){
+  const seen={},kill=[];
+  Object.keys(S.w).sort().forEach(d=>S.w[d].slice().sort((a,b)=>(a.u||0)-(b.u||0)).forEach(e=>{
+    const key=d+'|'+e.kind+'|'+(e.kind==='f'?e.ex+'|'+JSON.stringify(e.sets):e.act+'|'+[e.min,e.km,e.kcal,e.fc,e.notes].join('|'));
+    if(seen[key])kill.push({d,id:e.id});else seen[key]=1;
+  }));
+  if(!kill.length){alert('No hay registros repetidos.');return}
+  if(!confirm('Hay '+kill.length+' registros repetidos (mismo día, mismo ejercicio, mismos datos). ¿Borrar las copias y dejar uno solo de cada uno?'))return;
+  const now=Date.now();S.tomb=S.tomb||{};
+  kill.forEach(k=>{S.tomb[k.id]=now;S.w[k.d]=S.w[k.d].filter(x=>x.id!==k.id)});
+  save();render();
+}
+
 /* ---------- Google Sheets ---------- */
 let syncing=false,syncT=null,syncMsg='';
 function cfg(){try{return JSON.parse(localStorage.getItem('gymlog_sync'))||{}}catch(e){return {}}}
@@ -461,12 +475,16 @@ async function doSync(){
     S.tomb=S.tomb||{};
     const entries=[];
     Object.keys(S.w).forEach(d=>S.w[d].forEach(e=>{if(!e.u)e.u=Date.now();entries.push(packE(d,e))}));
-    const r=await fetch(c.url,{method:'POST',body:JSON.stringify({t:c.token,entries,tomb:S.tomb,ex:S.ex,acts:S.acts,cfgU:S.cfgU||0})});
-    const j=await r.json();
+    let r;
+    try{r=await fetch(c.url,{method:'POST',body:JSON.stringify({t:c.token,entries,tomb:S.tomb,ex:S.ex,acts:S.acts,cfgU:S.cfgU||0})})}
+    catch(x){throw new Error('no se pudo conectar con el Sheet. Revisá que la URL termine en /exec y que la implementación tenga acceso "Cualquier persona".')}
+    const txt=await r.text();let j;
+    try{j=JSON.parse(txt)}catch(x){throw new Error('la URL no devolvió datos del script. Revisá el acceso ("Cualquier persona") y que sea la implementación nueva.')}
     if(!j.ok)throw new Error(j.error||'Error');
     mergeIn(j);saveRaw();
     if(!document.getElementById('modal').innerHTML)render();
-    const n=new Date();setMsg('Sincronizado '+pad(n.getHours())+':'+pad(n.getMinutes()));
+    const nl=(j.entries||[]).filter(x=>!x.del).length;
+    const n=new Date();setMsg('Sincronizado '+pad(n.getHours())+':'+pad(n.getMinutes())+' · '+nl+' registros en el Sheet');
   }catch(err){setMsg('No se pudo sincronizar: '+(err.message||err))}
   syncing=false;
 }
@@ -484,10 +502,12 @@ document.getElementById('app').addEventListener('click',e=>{
   else if(t.id==='newA')modalA('');
   else if(t.id==='ssave'){
     const u=document.getElementById('sUrl').value.trim(),k=document.getElementById('sTok').value.trim();
+    if(u&&!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(u)){setMsg('La URL no es la correcta: tiene que ser https://script.google.com/macros/s/…/exec (la que da "Implementar").');return}
     try{localStorage.setItem('gymlog_sync',JSON.stringify({url:u,token:k}))}catch(x){}
     if(u)doSync();else setMsg('Sincronización desactivada');
   }
   else if(t.id==='ssync')doSync();
+  else if(t.id==='dedup')dedupe();
   else if(t.dataset.edit)modalEdit(t.dataset.edit);
   else if(t.dataset.del){if(confirm('¿Borrar este registro?')){S.tomb[t.dataset.del]=Date.now();S.w[date]=S.w[date].filter(x=>x.id!==t.dataset.del);save();render()}}
   else if(t.dataset.m){metric=t.dataset.m;render()}

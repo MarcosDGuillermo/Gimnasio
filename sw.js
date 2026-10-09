@@ -1,5 +1,5 @@
 // Service worker de Gimnasio: abre sin conexión y se actualiza solo cuando hay señal.
-const CACHE = 'gimnasio-v2';
+const CACHE = 'gimnasio-v3';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
