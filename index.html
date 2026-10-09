@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0f1115">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gimnasio">
 <title>Gimnasio</title>
 <style>
 :root{--bg:#0f1115;--card:#1a1d24;--card2:#222632;--txt:#eef0f4;--mut:#8b93a5;--acc:#4ade80;--acc2:#22c55e;--red:#f87171;--line:#2a2f3c}
@@ -502,6 +508,7 @@ document.getElementById('app').addEventListener('change',e=>{
 window.addEventListener('resize',()=>{if(tab==='prog')drawChart()});
 render();
 if(cfg().url)doSync();
+if('serviceWorker' in navigator)window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{})});
 </script>
 </body>
 </html>
