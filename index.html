@@ -98,12 +98,14 @@ function seed(){
 function fixEx(r){
   if(!r.ex)r.ex=defaultEx();
   if(!r.tomb)r.tomb={};
+  if(!r.dirty)r.dirty={};
   if(!r.acts){r.acts={};ACTS0.forEach(a=>{r.acts[a[0]]={km:!!a[1]}})}
   Object.values(r.w).forEach(a=>a.forEach(e=>{if(e.kind==='f'&&!r.ex[e.ex])r.ex[e.ex]={tipo:'kg'};if(e.kind==='c'&&!r.acts[e.act])r.acts[e.act]={km:!!e.km}}));
   return r;
 }
 function load(){let r=null;try{r=JSON.parse(localStorage.getItem(KEY))}catch(e){}if(!r||!r.w)r=seed();return fixEx(r)}
 let S=load();
+function mark(id){(S.dirty=S.dirty||{})[id]=1}
 function saveRaw(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 function save(){saveRaw();scheduleSync()}
 
@@ -278,7 +280,7 @@ function modalF(){
     if(mr||!pend.length){if(!readBlock())return}
     let e=(S.w[date]||[]).find(x=>x.kind==='f'&&x.ex===key);
     const sets=[];pend.forEach(b=>{for(let i=0;i<b.n;i++)sets.push([b.kg,b.reps])});
-    if(e){e.sets=e.sets.concat(sets);e.u=Date.now()}else{(S.w[date]=S.w[date]||[]).push({id:uid(),kind:'f',ex:key,sets,u:Date.now()})}
+    if(e){e.sets=e.sets.concat(sets);e.u=Date.now();mark(e.id)}else{const ne={id:uid(),kind:'f',ex:key,sets,u:Date.now()};(S.w[date]=S.w[date]||[]).push(ne);mark(ne.id)}
     save();closeM();render();
   };
   renderTp();
@@ -331,7 +333,7 @@ function modalE(name){
     const nn=document.getElementById('en').value.trim();if(!nn){document.getElementById('en').focus();return}
     const other=findEx(nn);
     if(other&&other!==name){alert('Ya existe un ejercicio con ese nombre');return}
-    if(!isNew&&nn!==name){delete S.ex[name];Object.values(S.w).forEach(a=>a.forEach(e=>{if(e.kind==='f'&&e.ex===name){e.ex=nn;e.u=Date.now()}}))}
+    if(!isNew&&nn!==name){delete S.ex[name];Object.values(S.w).forEach(a=>a.forEach(e=>{if(e.kind==='f'&&e.ex===name){e.ex=nn;e.u=Date.now();mark(e.id)}}))}
     S.ex[nn]=c;S.cfgU=Date.now();save();closeM();render();
   };
   if(!isNew)document.getElementById('edl').onclick=()=>{
@@ -361,7 +363,7 @@ function modalEdit(id){
   document.getElementById('esv').onclick=()=>{
     const sets=rows.filter(r=>r[1]>0).map(r=>[t.tipo==='corporal'?0:r[0],Math.round(r[1])]);
     if(!sets.length){alert('Cargá al menos una serie con repeticiones (o borrá el ejercicio con la ✕).');return}
-    e.sets=sets;e.u=Date.now();save();closeM();render();
+    e.sets=sets;e.u=Date.now();mark(e.id);save();closeM();render();
   };
 }
 
@@ -377,7 +379,7 @@ function modalA(name){
     const nn=document.getElementById('an').value.trim();if(!nn){document.getElementById('an').focus();return}
     const other=findAct(nn);
     if(other&&other!==name){alert('Ya existe una actividad con ese nombre');return}
-    if(!isNew&&nn!==name){delete S.acts[name];Object.values(S.w).forEach(a=>a.forEach(e=>{if(e.kind==='c'&&e.act===name){e.act=nn;e.u=Date.now()}}))}
+    if(!isNew&&nn!==name){delete S.acts[name];Object.values(S.w).forEach(a=>a.forEach(e=>{if(e.kind==='c'&&e.act===name){e.act=nn;e.u=Date.now();mark(e.id)}}))}
     S.acts[nn]={km:document.getElementById('ak').checked};S.cfgU=Date.now();save();closeM();render();
   };
   if(!isNew)document.getElementById('adl').onclick=()=>{
@@ -406,7 +408,7 @@ function modalC(ed){
       if(fa){act=fa;hk=hasKm(fa)}else{hk=document.getElementById('nk').checked;act=nn;S.acts[nn]={km:hk};S.cfgU=Date.now()}
     }
     const e={id:uid(),kind:'c',act,min:num(document.getElementById('cm').value),km:hk?num(document.getElementById('ck').value):0,kcal:num(document.getElementById('cc').value),fc:num(document.getElementById('cf').value),notes:document.getElementById('cn').value.trim(),u:Date.now()};
-    if(ed.id)Object.assign(ed,e,{id:ed.id});else(S.w[date]=S.w[date]||[]).push(e);
+    if(ed.id){Object.assign(ed,e,{id:ed.id});mark(ed.id)}else{(S.w[date]=S.w[date]||[]).push(e);mark(e.id)}
     save();closeM();render();
   };
 }
@@ -451,20 +453,21 @@ function syncCard(){
 }
 function packE(d,e){return {id:e.id,fecha:d,kind:e.kind,name:e.kind==='f'?e.ex:e.act,d:e.kind==='f'?{sets:e.sets}:{min:e.min,km:e.km,kcal:e.kcal,fc:e.fc,notes:e.notes},u:e.u}}
 function unpackE(s){return s.kind==='f'?{id:s.id,kind:'f',ex:s.name,sets:(s.d&&s.d.sets)||[],u:s.u}:Object.assign({id:s.id,kind:'c',act:s.name,u:s.u},s.d||{})}
-function mergeIn(j){
-  S.tomb=S.tomb||{};
-  const loc={};Object.keys(S.w).forEach(d=>S.w[d].forEach(e=>{loc[e.id]={d,e}}));
+function applyServer(j,sent,tombSent){
+  S.tomb=S.tomb||{};S.dirty=S.dirty||{};
+  // lo que se cambió en este celular mientras viajaba la consulta se conserva
+  const keep={};
+  Object.keys(S.w).forEach(d=>S.w[d].forEach(e=>{if(S.dirty[e.id]&&sent[e.id]!==e.u)keep[e.id]={d,e}}));
+  const nw={};
   (j.entries||[]).forEach(s=>{
-    const l=loc[s.id];
-    if(s.del){
-      if(l&&s.u>=(l.e.u||0))S.w[l.d]=S.w[l.d].filter(x=>x.id!==s.id);
-      S.tomb[s.id]=Math.max(S.tomb[s.id]||0,s.u);return;
-    }
-    if(l&&(l.e.u||0)>=s.u)return;
-    if(S.tomb[s.id]&&S.tomb[s.id]>=s.u)return;
-    if(l)S.w[l.d]=S.w[l.d].filter(x=>x.id!==s.id);
-    (S.w[s.fecha]=S.w[s.fecha]||[]).push(unpackE(s));
+    if(s.del||!s.fecha||keep[s.id])return;
+    if(S.tomb[s.id]&&!tombSent[s.id])return;
+    (nw[s.fecha]=nw[s.fecha]||[]).push(unpackE(s));
   });
+  Object.values(keep).forEach(k=>(nw[k.d]=nw[k.d]||[]).push(k.e));
+  S.w=nw; // el Sheet es la fuente de verdad: lo borrado allá se borra acá
+  Object.keys(sent).forEach(id=>{if(!keep[id])delete S.dirty[id]});
+  Object.keys(tombSent).forEach(id=>{if(S.tomb[id]===tombSent[id])delete S.tomb[id]});
   if(j.ex&&(j.cfgU||0)>(S.cfgU||0)){S.ex=j.ex;S.acts=j.acts||S.acts;S.cfgU=j.cfgU}
   fixEx(S);
 }
@@ -472,18 +475,19 @@ async function doSync(){
   const c=cfg();if(!c.url||syncing)return;
   syncing=true;setMsg('Sincronizando…');
   try{
-    S.tomb=S.tomb||{};
-    const entries=[];
-    Object.keys(S.w).forEach(d=>S.w[d].forEach(e=>{if(!e.u)e.u=Date.now();entries.push(packE(d,e))}));
+    S.tomb=S.tomb||{};S.dirty=S.dirty||{};
+    const entries=[],sent={};
+    Object.keys(S.w).forEach(d=>S.w[d].forEach(e=>{if(S.dirty[e.id]){if(!e.u)e.u=Date.now();entries.push(packE(d,e));sent[e.id]=e.u}}));
+    const tombSent=Object.assign({},S.tomb);
     let r;
-    try{r=await fetch(c.url,{method:'POST',body:JSON.stringify({t:c.token,entries,tomb:S.tomb,ex:S.ex,acts:S.acts,cfgU:S.cfgU||0})})}
+    try{r=await fetch(c.url,{method:'POST',body:JSON.stringify({t:c.token,entries,tomb:tombSent,ex:S.ex,acts:S.acts,cfgU:S.cfgU||0})})}
     catch(x){throw new Error('no se pudo conectar con el Sheet. Revisá que la URL termine en /exec y que la implementación tenga acceso "Cualquier persona".')}
     const txt=await r.text();let j;
     try{j=JSON.parse(txt)}catch(x){throw new Error('la URL no devolvió datos del script. Revisá el acceso ("Cualquier persona") y que sea la implementación nueva.')}
     if(!j.ok)throw new Error(j.error||'Error');
-    mergeIn(j);saveRaw();
+    applyServer(j,sent,tombSent);saveRaw();
     if(!document.getElementById('modal').innerHTML)render();
-    const nl=(j.entries||[]).filter(x=>!x.del).length;
+    const nl=(j.entries||[]).filter(x=>!x.del&&x.fecha).length;
     const n=new Date();setMsg('Sincronizado '+pad(n.getHours())+':'+pad(n.getMinutes())+' · '+nl+' registros en el Sheet');
   }catch(err){setMsg('No se pudo sincronizar: '+(err.message||err))}
   syncing=false;
@@ -523,7 +527,7 @@ document.getElementById('app').addEventListener('click',e=>{
 document.getElementById('app').addEventListener('change',e=>{
   if(e.target.id==='dt'&&e.target.value){date=e.target.value;render()}
   if(e.target.id==='exsel'){exSel=e.target.value;render()}
-  if(e.target.id==='fl'){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const o=JSON.parse(r.result);if(!o.w)throw 0;if(confirm('Esto reemplaza los datos actuales. ¿Seguir?')){S=fixEx(o);save();render()}}catch(x){alert('Archivo inválido')}};r.readAsText(f)}
+  if(e.target.id==='fl'){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const o=JSON.parse(r.result);if(!o.w)throw 0;if(confirm('Esto reemplaza los datos actuales. ¿Seguir?')){S=fixEx(o);S.dirty={};Object.values(S.w).forEach(a=>a.forEach(x=>mark(x.id)));save();render()}}catch(x){alert('Archivo inválido')}};r.readAsText(f)}
 });
 window.addEventListener('resize',()=>{if(tab==='prog')drawChart()});
 render();
